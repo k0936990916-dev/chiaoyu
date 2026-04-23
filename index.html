@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>地理美食家 - 直覺對決版</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #fff9c4; font-family: 'Segoe UI', "微軟正黑體", sans-serif; touch-action: none; user-select: none; }
+        
+        /* 題目公告欄 */
+        #quiz-board {
+            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+            width: 85%; max-width: 700px;
+            background: linear-gradient(135deg, #ffffff 0%, #fff3e0 100%);
+            border: 5px solid #fb8c00; border-radius: 20px;
+            padding: 15px; text-align: center; z-index: 20;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+        }
+        #quiz-text { font-size: clamp(18px, 5vw, 28px); color: #e65100; font-weight: 900; margin: 0; }
+
+        #ui-layer {
+            position: absolute; top: 20px; left: 20px;
+            color: #ef6c00; font-weight: bold; pointer-events: none; z-index: 25;
+        }
+        .stat { font-size: 20px; background: white; padding: 8px 18px; border-radius: 25px; border: 2px solid #ffe0b2; box-shadow: 0 4px 0 #ffcc80; }
+
+        #crosshair {
+            position: absolute; top: 50%; left: 50%;
+            width: 40px; height: 40px;
+            border: 2px solid rgba(230, 81, 0, 0.8); border-radius: 50%;
+            transform: translate(-50%, -50%); pointer-events: none; z-index: 5;
+        }
+        #crosshair::before, #crosshair::after { content: ''; position: absolute; background: #e65100; }
+        #crosshair::before { top: 50%; left: -10px; width: 10px; height: 2px; }
+        #crosshair::after { top: -10px; left: 50%; width: 2px; height: 10px; }
+
+        #controls {
+            position: absolute; bottom: 30px; width: 100%;
+            display: flex; justify-content: space-between; align-items: flex-end;
+            padding: 0 40px; box-sizing: border-box; pointer-events: none;
+        }
+        .joystick-area {
+            width: 140px; height: 140px; background: rgba(255,255,255,0.4);
+            border-radius: 50%; position: relative; pointer-events: auto;
+            border: 3px solid rgba(255,255,255,0.6);
+        }
+        #joystick-stick {
+            width: 60px; height: 60px; background: #fb8c00;
+            border-radius: 50%; position: absolute; top: 40px; left: 40px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+        }
+        #shoot-btn {
+            width: 110px; height: 110px; background: #f44336;
+            border-radius: 50%; border: 6px solid white;
+            color: white; font-size: 24px; font-weight: bold;
+            display: flex; justify-content: center; align-items: center;
+            pointer-events: auto; box-shadow: 0 8px 0 #b71c1c;
+            cursor: pointer; active { transform: translateY(4px); box-shadow: 0 2px 0 #b71c1c; }
+        }
+
+        #overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: #fff9c4; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 100; text-align: center;
+        }
+        #msg-popup {
+            position: absolute; top: 45%; left: 50%; transform: translate(-50%, -50%);
+            font-size: 40px; font-weight: bold; pointer-events: none; opacity: 0;
+            z-index: 30; transition: opacity 0.2s; text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="quiz-board"><p id="quiz-text">點擊開始進行地理狩獵！</p></div>
+    <div id="ui-layer"><div class="stat">🍔 分數: <span id="score-val">0</span></div></div>
+    <div id="msg-popup"></div>
+    <div id="crosshair"></div>
+
+    <div id="controls">
+        <div class="joystick-area" id="joy-base"><div id="joystick-stick"></div></div>
+        <div id="shoot-btn">開火</div>
+    </div>
+
+    <div id="overlay" onclick="startGame()">
+        <h1 style="color:#e65100; font-size: 50px;">🍕 地理美食獵人 🍣</h1>
+        <p style="font-size: 20px; color: #5d4037;">找到「正確答案」的怪獸並射擊它！</p>
+        <div style="background:#fb8c00; color:white; padding:15px 40px; border-radius:40px; font-weight:bold; cursor:pointer; margin: 20px;">進入殿堂</div>
+        <p style="color: #888;">[ 方向鍵: 移動 ] [ 空白鍵: 射擊 ] [ 滑鼠: 瞄準 ]</p>
+    </div>
+
+    <script type="importmap">
+        { "imports": { "three": "https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.module.min.js" } }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        const geoData = [
+            { q: "台灣最高的山脈是？", a: "玉山山脈", w: ["雪山山脈", "中央山脈", "海岸山脈"] },
+            { q: "哪條緯線通過台灣？", a: "北回歸線", w: ["赤道", "南回歸線", "本初子午線"] },
+            { q: "世界最大的海洋是？", a: "太平洋", w: ["大西洋", "印度洋", "北極海"] },
+            { q: "台灣島地形分佈最廣的是？", a: "山地", w: ["平原", "盆地", "台地"] },
+            { q: "被稱為「雨都」的是哪個城市？", a: "基隆市", w: ["高雄市", "宜蘭市", "新竹市"] },
+            { q: "季風氣候區的主要特徵是？", a: "風向隨季節改變", w: ["全年高溫多雨", "終年乾燥少雨", "冬季暖和濕潤"] },
+            { q: "台灣與中國大陸之間的海域名稱？", a: "台灣海峽", w: ["巴士海峽", "東海", "南海"] }
+        ];
+
+        let score = 0, gameActive = false, currentQIndex = 0;
+        let monsters = [];
+        const clock = new THREE.Clock();
+        const keys = { ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false };
+        const moveVector = { x: 0, y: 0 };
+
+        // 3D Setup
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xfff9c4);
+        scene.fog = new THREE.Fog(0xfff9c4, 5, 45);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+        const light = new THREE.DirectionalLight(0xffffff, 0.5);
+        light.position.set(5, 20, 10);
+        scene.add(light);
+
+        // Ground
+        const ground = new THREE.Mesh(new THREE.PlaneGeometry(100,100), new THREE.MeshStandardMaterial({color: 0xffecb3}));
+        ground.rotation.x = -Math.PI/2;
+        scene.add(ground);
+
+        // Sound
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playSfx(f, t, d, v) {
+            if(audioCtx.state === 'suspended') audioCtx.resume();
+            const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+            o.type = t; o.frequency.setValueAtTime(f, audioCtx.currentTime);
+            g.gain.setValueAtTime(v, audioCtx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + d);
+            o.connect(g); g.connect(audioCtx.destination);
+            o.start(); o.stop(audioCtx.currentTime + d);
+        }
+
+        // Monster Factory
+        function spawnMonster(text, isCorrect) {
+            const group = new THREE.Group();
+            group.userData = { isMonster: true, isCorrect: isCorrect, phase: Math.random()*10 };
+
+            // Burger Design
+            const bunMat = new THREE.MeshStandardMaterial({color: 0xffb74d});
+            const top = new THREE.Mesh(new THREE.SphereGeometry(0.7, 16, 12, 0, Math.PI*2, 0, Math.PI/2), bunMat);
+            top.position.y = 0.5;
+            const patty = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.75, 0.3), new THREE.MeshStandardMaterial({color: 0x5d4037}));
+            patty.position.y = 0.3;
+            const burger = new THREE.Group();
+            burger.add(top, patty, new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 0.2), bunMat));
+            burger.position.y = 0.8;
+            group.add(burger);
+
+            // Label (All same style - Orange)
+            const canvas = document.createElement('canvas');
+            canvas.width = 400; canvas.height = 100;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#fb8c00'; // Uniform color
+            ctx.roundRect(0, 0, 400, 100, 25); ctx.fill();
+            ctx.font = 'bold 44px "微軟正黑體"'; ctx.fillStyle = 'white'; ctx.textAlign = 'center';
+            ctx.fillText(text, 200, 65);
+            const tex = new THREE.CanvasTexture(canvas);
+            const sprite = new THREE.Sprite(new THREE.SpriteMaterial({map: tex}));
+            sprite.scale.set(3.2, 0.8, 1);
+            sprite.position.y = 2.4;
+            group.add(sprite);
+
+            group.position.set(Math.random()*18-9, 0, -30 - Math.random()*10);
+            scene.add(group);
+            monsters.push(group);
+        }
+
+        function setupWave() {
+            monsters.forEach(m => scene.remove(m));
+            monsters = [];
+            const quiz = geoData[currentQIndex];
+            document.getElementById('quiz-text').innerText = quiz.q;
+            
+            // Spawn 1 correct, 3 wrong ones
+            spawnMonster(quiz.a, true);
+            quiz.w.forEach(wrong => spawnMonster(wrong, false));
+        }
+
+        // Controls
+        window.addEventListener('keydown', (e) => { if(keys.hasOwnProperty(e.key)) keys[e.key] = true; if(e.code === 'Space') fire(); });
+        window.addEventListener('keyup', (e) => { if(keys.hasOwnProperty(e.key)) keys[e.key] = false; });
+        document.addEventListener('mousemove', (e) => { if(document.pointerLockElement){ camera.rotation.y -= e.movementX*0.003; camera.rotation.x = Math.max(-1.1, Math.min(1.1, camera.rotation.x - e.movementY*0.003)); }});
+        
+        const joyBase = document.getElementById('joy-base'), joyStick = document.getElementById('joystick-stick');
+        const handleJoy = (e) => {
+            const t = e.touches[0], r = joyBase.getBoundingClientRect();
+            let dx = t.clientX - (r.left + 70), dy = t.clientY - (r.top + 70);
+            const dist = Math.sqrt(dx*dx+dy*dy), max = 50;
+            if(dist > max) { dx *= max/dist; dy *= max/dist; }
+            joyStick.style.transform = `translate(${dx}px, ${dy}px)`;
+            moveVector.x = dx/max; moveVector.y = dy/max;
+        };
+        joyBase.addEventListener('touchstart', handleJoy);
+        joyBase.addEventListener('touchmove', (e) => { e.preventDefault(); handleJoy(e); });
+        joyBase.addEventListener('touchend', () => { joyStick.style.transform = 'none'; moveVector.x = moveVector.y = 0; });
+
+        function fire() {
+            if(!gameActive) return;
+            playSfx(500, 'square', 0.1, 0.1);
+            const ray = new THREE.Raycaster();
+            ray.setFromCamera(new THREE.Vector2(0,0), camera);
+            const hits = ray.intersectObjects(scene.children, true);
+            if(hits.length > 0) {
+                let hitObj = hits[0].object;
+                while(hitObj && !hitObj.userData.isMonster) hitObj = hitObj.parent;
+                if(hitObj) {
+                    if(hitObj.userData.isCorrect) {
+                        playSfx(900, 'sine', 0.2, 0.2);
+                        score += 50; document.getElementById('score-val').innerText = score;
+                        showPopup("答對了！精準狩獵 🍔", "#2e7d32");
+                        currentQIndex = (currentQIndex + 1) % geoData.length;
+                        setupWave();
+                    } else {
+                        playSfx(100, 'sawtooth', 0.3, 0.2);
+                        score = Math.max(0, score - 20); document.getElementById('score-val').innerText = score;
+                        showPopup("猜錯啦！那是過期食物 🍟", "#c62828");
+                    }
+                }
+            }
+        }
+        document.getElementById('shoot-btn').addEventListener('touchstart', (e) => { e.preventDefault(); fire(); });
+
+        function showPopup(t, c) {
+            const p = document.getElementById('msg-popup');
+            p.innerText = t; p.style.color = c; p.style.opacity = 1;
+            setTimeout(() => p.style.opacity = 0, 1000);
+        }
+
+        window.startGame = () => {
+            if(window.innerWidth > 800) document.body.requestPointerLock();
+            document.getElementById('overlay').style.display = 'none';
+            gameActive = true;
+            setupWave();
+        };
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if(gameActive) {
+                const dt = clock.getDelta(), speed = 8 * dt;
+                
+                // Keyboard
+                if(keys.ArrowUp) camera.translateZ(-speed);
+                if(keys.ArrowDown) camera.translateZ(speed);
+                if(keys.ArrowLeft) camera.translateX(-speed);
+                if(keys.ArrowRight) camera.translateX(speed);
+                
+                // Joystick
+                const forward = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion).setY(0).normalize();
+                const right = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion).setY(0).normalize();
+                camera.position.add(forward.multiplyScalar(-moveVector.y * speed));
+                camera.position.add(right.multiplyScalar(moveVector.x * speed));
+                
+                camera.position.y = 1.8;
+                camera.position.x = Math.max(-25, Math.min(25, camera.position.x));
+                camera.position.z = Math.max(-45, Math.min(15, camera.position.z));
+
+                monsters.forEach(m => {
+                    m.position.z += (1.2 + score/1000) * dt;
+                    m.userData.phase += dt * 4;
+                    m.position.y = Math.sin(m.userData.phase) * 0.4;
+                    // Respawn if past player
+                    if(m.position.z > camera.position.z + 5) {
+                        m.position.z = -40;
+                    }
+                });
+            }
+            renderer.render(scene, camera);
+        }
+        animate();
+        window.addEventListener('resize', () => { camera.aspect = window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
+    </script>
+</body>
+</html>
